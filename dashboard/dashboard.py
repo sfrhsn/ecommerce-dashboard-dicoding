@@ -22,13 +22,11 @@ review_path = Path(__file__).parent / "review_comparison.csv"
 def load_data(path):
     df = pd.read_csv(path)
     
-    # Menangani bentrokan nama kolom akibat pd.merge (total_orders_x atau total_orders_y)
     if "total_orders_x" in df.columns:
         df.rename(columns={"total_orders_x": "total_orders"}, inplace=True)
     elif "total_orders_y" in df.columns:
         df.rename(columns={"total_orders_y": "total_orders"}, inplace=True)
         
-    # Wajib konversi kolom angka agar Streamlit bisa menggambar grafik line
     numeric_cols = ["total_orders", "total_payment", "late_percentage", "avg_delivery_days"]
     for col in numeric_cols:
         if col in df.columns:

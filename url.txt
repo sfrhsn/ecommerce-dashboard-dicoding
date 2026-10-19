@@ -1,1 +1,2 @@
-Link Dashboard: https://sfrhsn-ecommerce-data-analysis-dashboarddashboard-tttqz2.streamlit.app/
+Link Dashboard: https://sfrhsn-ecommerce-dashboard-dicoding-dashboarddashboard-8ucxfy.streamlit.app/
+Link Github: https://github.com/sfrhsn/ecommerce-dashboard-dicoding
