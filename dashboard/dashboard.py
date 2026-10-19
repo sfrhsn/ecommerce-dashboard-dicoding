@@ -1,224 +1,133 @@
-
 import streamlit as st
 import pandas as pd
 from pathlib import Path
 
+# Konfigurasi Halaman
 st.set_page_config(
     page_title="E-Commerce Analytics Dashboard",
     layout="wide"
 )
 
-st.title("E-Commerce Public Dataset")
+st.title("E-Commerce Public Dataset Analysis")
 st.write(
-    "Dashboard untuk menganalisis tren pesanan, pembayaran, "
-    "ketepatan pengiriman, dan ulasan pelanggan."
+    "Dashboard interaktif untuk menganalisis tren pesanan, total pembayaran, "
+    "kinerja pengiriman, dan skor ulasan pelanggan."
 )
 
+# Jalur File Data
 data_path = Path(__file__).parent / "main_data.csv"
+review_path = Path(__file__).parent / "review_comparison.csv"
 
 @st.cache_data
 def load_data(path):
-    return pd.read_csv(path)
+    df = pd.read_csv(path)
+    
+    # Menangani bentrokan nama kolom akibat pd.merge (total_orders_x atau total_orders_y)
+    if "total_orders_x" in df.columns:
+        df.rename(columns={"total_orders_x": "total_orders"}, inplace=True)
+    elif "total_orders_y" in df.columns:
+        df.rename(columns={"total_orders_y": "total_orders"}, inplace=True)
+        
+    # Wajib konversi kolom angka agar Streamlit bisa menggambar grafik line
+    numeric_cols = ["total_orders", "total_payment", "late_percentage", "avg_delivery_days"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+            
+    return df
 
+# Verifikasi File Utama
 if not data_path.exists():
-    st.error(
-        "File main_data.csv tidak ditemukan. "
-        "Pastikan file berada di folder yang sama dengan dashboard.py."
-    )
+    st.error(f"File `main_data.csv` tidak ditemukan di folder `{Path(__file__).parent}`.")
     st.stop()
 
 try:
-    data = load_data(data_path)
+    monthly = load_data(data_path)
 except Exception as e:
-    st.error(f"Data gagal dibaca: {e}")
+    st.error(f"Gagal membaca data utama: {e}")
     st.stop()
 
-# Memeriksa kolom yang dibutuhkan
-required_columns = [
-    "record_type",
-    "month",
-    "total_orders",
-    "total_payment",
-    "late_percentage",
-    "avg_delivery_days",
-    "delivery_status",
-    "average_review_score",
-    "total_reviews"
-]
+# Mengurutkan bulan 
+if "month" in monthly.columns:
+    monthly["month"] = monthly["month"].astype(str)
+    monthly = monthly.sort_values("month").reset_index(drop=True)
 
-missing_columns = [
-    col for col in required_columns if col not in data.columns
-]
-
-if missing_columns:
-    st.error(
-        "Kolom berikut belum tersedia di main_data.csv: "
-        + ", ".join(missing_columns)
-    )
-    st.stop()
-
-data["record_type"] = data["record_type"].astype(str).str.strip().str.lower()
-
-# Mengubah kolom angka agar bisa dihitung
-numeric_columns = [
-    "total_orders",
-    "total_payment",
-    "late_percentage",
-    "avg_delivery_days",
-    "average_review_score",
-    "total_reviews"
-]
-
-for column in numeric_columns:
-    data[column] = pd.to_numeric(data[column], errors="coerce")
-
-sales = data[data["record_type"] == "sales"].copy()
-delivery = data[data["record_type"] == "delivery"].copy()
-monthly_data = data[data["record_type"] == "monthly"].copy()
-reviews = data[data["record_type"] == "review"].copy()
-
-# Mendukung CSV yang menggunakan kategori monthly
-if not monthly_data.empty:
-    if sales.empty:
-        sales = monthly_data.copy()
-    if delivery.empty:
-        delivery = monthly_data.copy()
-
-# Menggabungkan data penjualan dan pengiriman berdasarkan bulan
-sales_monthly = (
-    sales.groupby("month", as_index=False)
-    .agg(
-        total_orders=("total_orders", "sum"),
-        total_payment=("total_payment", "sum")
-    )
-)
-
-delivery_monthly = (
-    delivery.groupby("month", as_index=False)
-    .agg(
-        late_percentage=("late_percentage", "mean"),
-        avg_delivery_days=("avg_delivery_days", "mean")
-    )
-)
-
-monthly = pd.merge(
-    sales_monthly,
-    delivery_monthly,
-    on="month",
-    how="outer"
-)
-
-# Mengurutkan bulan secara kronologis jika format YYYY-MM
-monthly = monthly.sort_values("month").reset_index(drop=True)
-
+# Sidebar Filter Bulan
 st.sidebar.header("Filter Data")
 
-if not monthly.empty:
-    months = monthly["month"].dropna().astype(str).unique().tolist()
-
+if "month" in monthly.columns and not monthly.empty:
+    months = monthly["month"].dropna().unique().tolist()
     selected_months = st.sidebar.multiselect(
-        "Pilih bulan",
+        "Pilih Periode Bulan:",
         options=months,
         default=months
     )
-
-    filtered = monthly[
-        monthly["month"].astype(str).isin(selected_months)
-    ].copy()
+    filtered = monthly[monthly["month"].isin(selected_months)].copy()
 else:
     filtered = monthly.copy()
     st.sidebar.info("Data bulanan belum tersedia.")
 
-st.subheader("Ringkasan")
 
-col1, col2, col3 = st.columns(3)
+st.subheader("Ringkasan Performa")
+col1, col2, col3, col4 = st.columns(4)
 
-total_orders = filtered["total_orders"].sum()
-total_payment = filtered["total_payment"].sum()
+total_orders = filtered["total_orders"].sum() if "total_orders" in filtered.columns else 0
+total_payment = filtered["total_payment"].sum() if "total_payment" in filtered.columns else 0
+avg_late = filtered["late_percentage"].mean() if "late_percentage" in filtered.columns else 0
+avg_days = filtered["avg_delivery_days"].mean() if "avg_delivery_days" in filtered.columns else 0
 
-late_values = filtered["late_percentage"].dropna()
-average_late = late_values.mean() if not late_values.empty else None
+col1.metric("Total Pesanan", f"{total_orders:,.0f}")
+col2.metric("Total Pembayaran", f"BRL {total_payment:,.2f}")
+col3.metric("Rata-rata Keterlambatan", f"{avg_late:.2f}%")
+col4.metric("Rata-rata Durasi", f"{avg_days:.1f} Hari")
 
-col1.metric(
-    "Total Pesanan",
-    f"{total_orders:,.0f}"
-)
+st.markdown("---")
 
-col2.metric(
-    "Total Pembayaran",
-    f"R$ {total_payment:,.2f}"
-)
 
-col3.metric(
-    "Rata-rata Keterlambatan",
-    f"{average_late:.2f}%"
-    if average_late is not None
-    else "Belum tersedia"
-)
+st.subheader("1. Tren Pesanan dan Total Pembayaran Bulanan")
 
-st.subheader("1. Tren Pesanan dan Pembayaran Bulanan")
+if not filtered.empty and "total_orders" in filtered.columns and "total_payment" in filtered.columns:
+    col_chart1, col_chart2 = st.columns(2)
+    
+    with col_chart1:
+        st.write("**Jumlah Pesanan (Orders)**")
+        chart_data1 = filtered[["month", "total_orders"]].set_index("month")
+        st.line_chart(chart_data1)
+        
+    with col_chart2:
+        st.write("**Total Pembayaran (Payment Value)**")
+        chart_data2 = filtered[["month", "total_payment"]].set_index("month")
+        st.line_chart(chart_data2)
 
-if not filtered.empty:
-    sales_chart = filtered.set_index("month")[
-        ["total_orders", "total_payment"]
-    ]
 
-    st.line_chart(sales_chart)
-else:
-    st.info("Pilih setidaknya satu bulan untuk melihat grafik.")
+st.subheader("2. Ketepatan Waktu dan Rata-rata Durasi Pengiriman")
 
-st.subheader("2. Ketepatan dan Waktu Pengiriman")
+if not filtered.empty and "late_percentage" in filtered.columns and "avg_delivery_days" in filtered.columns:
+    col_del1, col_del2 = st.columns(2)
+    
+    with col_del1:
+        st.write("**Persentase Keterlambatan (%)**")
+        chart_del1 = filtered[["month", "late_percentage"]].set_index("month")
+        st.line_chart(chart_del1)
+        
+    with col_del2:
+        st.write("**Rata-rata Waktu Pengiriman (Hari)**")
+        chart_del2 = filtered[["month", "avg_delivery_days"]].set_index("month")
+        st.line_chart(chart_del2)
 
-delivery_chart_data = filtered[
-    ["month", "late_percentage", "avg_delivery_days"]
-].dropna(
-    how="all",
-    subset=["late_percentage", "avg_delivery_days"]
-)
 
-if not delivery_chart_data.empty:
-    delivery_chart = delivery_chart_data.set_index("month")[
-        ["late_percentage", "avg_delivery_days"]
-    ]
+st.subheader("3. Rata-Rata Skor Ulasan Berdasarkan Status Pengiriman")
 
-    st.line_chart(delivery_chart)
+if review_path.exists():
+    reviews_data = pd.read_csv(review_path)
+    if "average_review_score" in reviews_data.columns:
+        reviews_data["average_review_score"] = pd.to_numeric(reviews_data["average_review_score"], errors="coerce")
+    
+    col_rev1, col_rev2 = st.columns([1, 1])
+    with col_rev1:
+        st.dataframe(reviews_data[["delivery_status", "average_review_score", "total_reviews"]], use_container_width=True, hide_index=True)
+    with col_rev2:
+        st.bar_chart(reviews_data.set_index("delivery_status")["average_review_score"])
 
-    st.caption(
-        "Persentase keterlambatan ditampilkan dalam persen, "
-        "sedangkan rata-rata waktu pengiriman ditampilkan dalam hari."
-    )
-else:
-    st.info("Data pengiriman tidak tersedia untuk filter bulan ini.")
-
-st.subheader("3. Skor Ulasan Berdasarkan Ketepatan Pengiriman")
-
-if not reviews.empty:
-    review_summary = (
-        reviews.groupby("delivery_status", as_index=False)
-        .agg(
-            average_review_score=("average_review_score", "mean"),
-            total_reviews=("total_reviews", "sum")
-        )
-    )
-
-    review_chart = review_summary.set_index("delivery_status")[
-        ["average_review_score"]
-    ]
-
-    st.bar_chart(review_chart)
-
-    st.dataframe(
-        review_summary,
-        use_container_width=True,
-        hide_index=True
-    )
-else:
-    st.warning("Data perbandingan ulasan belum tersedia.")
-
-with st.expander("Lihat data bulanan"):
-    st.dataframe(
-        filtered,
-        use_container_width=True,
-        hide_index=True
-    )
-
+with st.expander("Lihat Detail Tabel Data Bulanan"):
+    st.dataframe(filtered, use_container_width=True, hide_index=True)
